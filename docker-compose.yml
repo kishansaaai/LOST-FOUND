@@ -1,0 +1,113 @@
+# Local development stack. `make up` runs `docker compose up -d --wait`,
+# which blocks until every healthcheck below reports healthy.
+name: lostfound
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    shm_size: 1gb                    # parallel HNSW index builds need more than Docker's 64 MB default
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lostfound}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lostfound_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-lostfound}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+    volumes: [mongodata:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports: ["6333:6333"]
+    volumes: [qdrantdata:/qdrant/storage]
+    healthcheck:   # image ships no curl/wget; probe the port with bash
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["${REDIS_PORT:-6379}:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    restart: unless-stopped
+    build: ./backend
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+psycopg://app_rw:${APP_RW_PASSWORD:-app_rw_dev}@postgres:5432/${POSTGRES_DB:-lostfound}
+      MIGRATION_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-lostfound}:${POSTGRES_PASSWORD:-lostfound_dev}@postgres:5432/${POSTGRES_DB:-lostfound}
+      MONGO_URL: mongodb://mongo:27017
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /repo/uploads
+      TEST_DB_ADMIN_URL: postgresql://${POSTGRES_USER:-lostfound}:${POSTGRES_PASSWORD:-lostfound_dev}@postgres:5432/postgres
+    working_dir: /repo/backend
+    ports: ["${API_PORT:-8000}:8000"]
+    volumes:
+      - .:/repo                      # whole repo: backend code, sql, tests, scripts, docs, uploads
+      - hfcache:/root/.cache/huggingface
+    depends_on:
+      postgres: {condition: service_healthy}
+      mongo:    {condition: service_healthy}
+      qdrant:   {condition: service_healthy}
+      redis:    {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  worker:   # outbox relay + embedding jobs
+    build: ./backend
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+psycopg://app_rw:${APP_RW_PASSWORD:-app_rw_dev}@postgres:5432/${POSTGRES_DB:-lostfound}
+      MONGO_URL: mongodb://mongo:27017
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+      UPLOAD_DIR: /repo/uploads
+    working_dir: /repo/backend
+    volumes:
+      - .:/repo
+      - hfcache:/root/.cache/huggingface
+    depends_on:
+      backend: {condition: service_healthy}
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}   # baked into the client bundle at build time
+    ports: ["3000:3000"]
+    depends_on:
+      backend: {condition: service_healthy}
+
+volumes:
+  pgdata:
+  mongodata:
+  qdrantdata:
+  redisdata:
+  hfcache:

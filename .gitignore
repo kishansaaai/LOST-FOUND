@@ -1,0 +1,14 @@
+.venv/
+.pgdata/
+.env
+__pycache__/
+*.pyc
+node_modules/
+.next/
+uploads/*
+!uploads/.gitkeep
+backend/.pytest_cache/
+.pytest_cache/
+test-results/
+playwright-report/
+uploads/seed/

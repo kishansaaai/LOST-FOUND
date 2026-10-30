@@ -26,6 +26,7 @@ class Session:
     def get(self, url, **kw): return self.client.get(url, headers=self.h, **kw)
     def post(self, url, **kw): return self.client.post(url, headers=self.h, **kw)
     def patch(self, url, **kw): return self.client.patch(url, headers=self.h, **kw)
+    def delete(self, url, **kw): return self.client.delete(url, headers=self.h, **kw)
 
 
 @pytest.fixture

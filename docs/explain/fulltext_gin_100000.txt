@@ -1,0 +1,24 @@
+-- SELECT item_id FROM item WHERE search_tsv @@ websearch_to_tsquery('english','item 4242 title')
+
+== with indexes ==
+Bitmap Heap Scan on item (actual rows=1 loops=1)
+  Recheck Cond: (search_tsv @@ '''item'' & ''4242'' & ''titl'''::tsquery)
+  Heap Blocks: exact=1
+  Buffers: shared hit=15
+  ->  Bitmap Index Scan on item_search_gin (actual rows=1 loops=1)
+        Index Cond: (search_tsv @@ '''item'' & ''4242'' & ''titl'''::tsquery)
+        Buffers: shared hit=14
+Planning:
+  Buffers: shared hit=1
+Planning Time: 0.100 ms
+Execution Time: 0.125 ms
+
+== indexes disabled ==
+Seq Scan on item (actual rows=1 loops=1)
+  Filter: (search_tsv @@ '''item'' & ''4242'' & ''titl'''::tsquery)
+  Rows Removed by Filter: 99999
+  Buffers: shared hit=2688
+Planning:
+  Buffers: shared hit=1
+Planning Time: 0.087 ms
+Execution Time: 28.393 ms

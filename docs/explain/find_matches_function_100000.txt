@@ -1,0 +1,13 @@
+-- SELECT * FROM find_matches(82558, 10, 0, 0)
+
+== with indexes ==
+Function Scan on find_matches (actual rows=10 loops=1)
+  Buffers: shared hit=3843 read=18822
+Planning Time: 0.049 ms
+Execution Time: 64.898 ms
+
+== indexes disabled ==
+Function Scan on find_matches (actual rows=10 loops=1)
+  Buffers: shared hit=6589 read=32971
+Planning Time: 0.052 ms
+Execution Time: 103.502 ms

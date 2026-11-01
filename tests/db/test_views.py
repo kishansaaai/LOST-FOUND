@@ -84,3 +84,30 @@ def test_match_details_and_likely_owners(db, w):
     assert rows == [(l1, w["a"], 1), (l2, w["b"], 2)]                     # closest description = most likely owner
     d = db.execute("SELECT lost_title, found_title, text_rank, image_rank FROM v_match_details LIMIT 1").fetchone()
     assert d[0] and d[1] and d[2] == 1 and d[3] is None
+
+
+def test_related_items_follows_the_match_graph(db, w):
+    f = w["f"]
+    a = f.item(w["a"], w["l1"], "lost", title="Lost wallet")
+    b = f.item(w["finder"], w["l1"], "found", title="Found wallet")
+    c = f.item(w["b"], w["l1"], "lost", title="Lost purse")
+    d = f.item(w["finder"], w["l1"], "found", title="Found purse")
+
+    def link(lost, found, rank):
+        return db.execute("SELECT out_match_id FROM persist_match(%s,%s,0.03,0,0.9,NULL,%s,NULL)",
+                          (lost, found, rank)).fetchone()[0]
+
+    link(a, b, 1)
+    bc = link(c, b, 2)
+    link(c, d, 1)
+
+    def related(item, depth=5):
+        return db.execute("SELECT related_item_id, hops FROM related_items(%s,%s)", (item, depth)).fetchall()
+
+    assert related(a) == [(b, 1), (c, 2), (d, 3)]                 # lost wallet -> found wallet -> lost purse -> found purse
+    assert related(a, 2) == [(b, 1), (c, 2)]                      # max_depth stops the walk
+    link(a, d, 3)                                                 # closes a cycle a-b-c-d-a
+    assert related(a) == [(b, 1), (d, 1), (c, 2)]                 # terminates; each item once, at its shortest distance
+    assert related(b) == [(a, 1), (c, 1), (d, 2)]                 # c is a direct neighbour of b
+    db.execute("SELECT reject_match(%s,%s)", (bc, w["staff"]))
+    assert related(b) == [(a, 1), (d, 2), (c, 3)]                 # rejected: c is only reachable the long way round (b-a-d-c)

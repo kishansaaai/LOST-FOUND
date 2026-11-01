@@ -118,3 +118,31 @@ BEGIN
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_location_hotspots;
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_match_quality;
 END $$;
+
+-- related_items(item, max_depth): every item reachable from p_item_id by following non-rejected matches,
+-- with the number of hops it takes. A recursive CTE walks the match graph one hop per iteration:
+--   lost wallet --match--> found wallet --match--> lost purse --match--> found purse   (hops 1, 2, 3)
+-- The path array records the items already visited on each walk: without it a cycle
+-- (A-B, B-C, C-D, D-A) would recurse forever; max_depth is the second safety net.
+-- Each item is reported once, at its shortest distance.
+CREATE FUNCTION related_items(p_item_id bigint, p_max_depth integer DEFAULT 5)
+RETURNS TABLE (related_item_id bigint, related_title text, related_type item_type, hops integer)
+LANGUAGE sql STABLE AS $$
+    WITH RECURSIVE chain(item_id, hops, path) AS (
+        SELECT p_item_id, 0, ARRAY[p_item_id]
+      UNION ALL
+        SELECT mo.item_id, c.hops + 1, c.path || mo.item_id
+          FROM chain c
+          JOIN match_item mi ON mi.item_id = c.item_id
+          JOIN match m       ON m.match_id = mi.match_id AND m.verification_status <> 'rejected'
+          JOIN match_item mo ON mo.match_id = mi.match_id AND mo.item_id <> mi.item_id
+         WHERE c.hops < p_max_depth
+           AND NOT mo.item_id = ANY (c.path)
+    )
+    SELECT i.item_id, i.title, i.item_type, min(c.hops)::integer
+      FROM chain c
+      JOIN item i USING (item_id)
+     WHERE c.hops > 0
+     GROUP BY i.item_id, i.title, i.item_type
+     ORDER BY min(c.hops), i.item_id
+$$;

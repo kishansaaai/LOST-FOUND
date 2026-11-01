@@ -1,0 +1,20 @@
+-- SELECT item_id FROM item WHERE status='open' AND item_type='found' AND category='keys' AND date_lost_or_found >= current_date - 30
+
+== with indexes ==
+Bitmap Heap Scan on item (actual rows=777 loops=1)
+  Recheck Cond: ((item_type = 'found'::item_type) AND (category = 'keys'::item_category) AND (date_lost_or_found >= (CURRENT_DATE - 30)) AND (status = 'open'::item_status))
+  Heap Blocks: exact=676
+  Buffers: shared hit=679
+  ->  Bitmap Index Scan on item_open_idx (actual rows=777 loops=1)
+        Index Cond: ((item_type = 'found'::item_type) AND (category = 'keys'::item_category) AND (date_lost_or_found >= (CURRENT_DATE - 30)))
+        Buffers: shared hit=3
+Planning Time: 0.112 ms
+Execution Time: 0.708 ms
+
+== indexes disabled ==
+Seq Scan on item (actual rows=777 loops=1)
+  Filter: ((status = 'open'::item_status) AND (item_type = 'found'::item_type) AND (category = 'keys'::item_category) AND (date_lost_or_found >= (CURRENT_DATE - 30)))
+  Rows Removed by Filter: 99223
+  Buffers: shared hit=2688
+Planning Time: 0.109 ms
+Execution Time: 11.136 ms

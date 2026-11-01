@@ -77,6 +77,13 @@ def test_report_match_claim_verify_return(client, make_user, location):
     assert alice.post("/notifications/read-all").json()["updated"] >= 4
     assert alice.get("/notifications/unread-count").json()["unread"] == 0
 
+    # --- Mongo DELETE: own notifications only
+    mine = alice.get("/notifications").json()["notifications"]
+    assert alice.delete(f"/notifications/{mine[0]['id']}").json() == {"deleted": 1}
+    assert len(alice.get("/notifications").json()["notifications"]) == len(mine) - 1
+    assert carol.delete(f"/notifications/{mine[1]['id']}").status_code == 404      # someone else's
+    assert alice.delete("/notifications/not-an-id").status_code == 404
+
     # --- analytics
     assert staff.post("/analytics/refresh").status_code == 202
     s = staff.get("/analytics/summary").json()

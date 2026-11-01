@@ -168,11 +168,13 @@ def seed(pairs: int, lost_only: int, found_only: int, reset: bool) -> None:
     log(f"embeddings done in {time.time() - t0:.0f}s")
 
     # ------------------------------------------------------------------- matching
-    with transaction(engine=engine) as conn:
-        created = 0
-        for i in ids:
+    created = 0
+    for i in ids:                                   # one short transaction per item, like the worker: no long-held locks
+        with transaction(engine=engine) as conn:
             created += sum(1 for m in matching.refresh_matches(conn, i, backend="pg") if m["out_is_new"])
-    log(f"{created} match suggestions created by find_matches() / RRF")
+    with transaction(engine=engine) as conn:
+        total_matches = scalar(conn, "SELECT count(*) FROM match")
+    log(f"{total_matches} match suggestions in the database (find_matches() / RRF; the worker may have created some of them first)")
 
     # ---------------------------------------------------------- workflow simulation
     pair_set = set(true_pairs)
@@ -208,8 +210,10 @@ def seed(pairs: int, lost_only: int, found_only: int, reset: bool) -> None:
             continue                                         # owner never followed up
         own = file_claim(m["lost_reporter_id"], m["found_item_id"], m["match_id"], rng.choice(PROOFS).format(noun="item"))
         if rng.random() < .3:
-            file_claim(rng.choice([r for r in regular if r != m["lost_reporter_id"]]), m["found_item_id"], None,
-                               rng.choice(WEAK_PROOFS).format(noun="item"))
+            with transaction(engine=engine) as conn:
+                finder_id = scalar(conn, "SELECT reporter_id FROM item WHERE item_id = :i", i=m["found_item_id"])
+            others = [r for r in regular if r not in (m["lost_reporter_id"], finder_id)]   # the finder cannot claim their own report
+            file_claim(rng.choice(others), m["found_item_id"], None, rng.choice(WEAK_PROOFS).format(noun="item"))
         staff = rng.choice(staff_ids)
         with transaction(staff, engine=engine) as conn:
             if roll < .70:                                   # verified and approved
